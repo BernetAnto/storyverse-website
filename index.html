@@ -35,7 +35,7 @@ const stories=[
 {id:5,title:'The Last Star Keeper',category:'Sci-Fi',desc:'The final guardian of the stars receives one last signal.',chapters:[['A Signal in the Dark','On a station beyond Neptune, Iven cared for the star beacons. One night, a signal arrived from a beacon that had been silent for a century. It contained a single word: Remember.'],['Light Years Away','Iven followed the signal through a field of sleeping satellites. Each beacon awakened as the ship passed, painting the darkness with distant light.'],['The New Constellation','At the source, Iven found a message from the first star keepers: the lights were never meant to be guarded alone. Iven sent the signal outward, inviting every world to become part of the constellation.']]},
 {id:6,title:'Letters in the Rain',category:'Romance',desc:'Two strangers connect through letters left at a bus stop.',chapters:[['The First Letter','On a rainy Tuesday, Kavin found a folded note beneath the bus-stop bench. It said, “If today feels heavy, I hope tomorrow is kinder.” He left a reply in the same place the next morning.'],['Ink and Raindrops','For weeks, the letters travelled between strangers. They shared small joys, old fears and favourite songs, never asking for names. The rainy bus stop became their favourite place.'],['Under One Umbrella','One evening, Kavin arrived to find someone holding the final letter. They laughed at the same familiar handwriting. Outside, the rain continued, but neither hurried away.']] }
 ];
-let active=null,chapter=0,fontSize=18,autoTimer=null,audioCtx=null,osc=null,gain=null,category='All';
+let active=null,chapter=0,fontSize=18,autoTimer=null,audioCtx=null,ambientMaster=null,ambientNodes=[],ambientOn=false,category='All';
 const $=id=>document.getElementById(id);
 function renderFilters(){const cats=['All',...new Set(stories.map(s=>s.category))];$('filters').innerHTML=cats.map(c=>'<button class="btn '+(category===c?'active':'')+'" data-cat="'+c+'">'+c+'</button>').join('');document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{category=b.dataset.cat;renderFilters();renderStories()})}
 function renderStories(){const q=$('search').value.toLowerCase();const list=stories.filter(s=>(category==='All'||s.category===category)&&(s.title+' '+s.desc+' '+s.category).toLowerCase().includes(q));$('stories').innerHTML=list.map((s,i)=>'<div class="story" data-id="'+s.id+'"><div class="cover" style="background:linear-gradient(135deg,'+['#4c2678,#14556b','#87416d','#275d70','#563b94','#7b4b38'][s.id-1]+',#b83e87)"><b>'+s.title+'</b></div><div class="story-body"><div class="tag">'+s.category+' · '+s.chapters.length+' chapters</div><h3>'+s.title+'</h3><p>'+s.desc+'</p><div class="read">Start reading →</div></div></div>').join('')||'<p class="muted">No stories found. Try another search.</p>';document.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openStory(+el.dataset.id))}
@@ -48,28 +48,65 @@ $('fontDown').onclick=()=>{fontSize=Math.max(14,fontSize-2);$('prose').style.fon
 $('theme').onclick=()=>document.body.classList.toggle('light');
 async function toggleAmbient(){
  const btn=$('ambient');
+ const AudioAPI=window.AudioContext||window.webkitAudioContext;
+ if(!AudioAPI){btn.textContent='Audio unsupported';return}
  try{
-  const AudioAPI=window.AudioContext||window.webkitAudioContext;
-  if(!AudioAPI){btn.textContent='Audio unavailable';return}
-  if(!audioCtx){
-   audioCtx=new AudioAPI();
-   await audioCtx.resume();
-   gain=audioCtx.createGain();gain.gain.setValueAtTime(0,audioCtx.currentTime);
-   const master= gain;master.connect(audioCtx.destination);
-   [174.61,220,261.63,329.63].forEach((hz,i)=>{
-    const o=audioCtx.createOscillator();const voice=audioCtx.createGain();
-    o.type=i===3?'triangle':'sine';o.frequency.value=hz;
-    voice.gain.value=i===3?0.10:0.18;
-    o.connect(voice);voice.connect(master);o.start();
-   });
-   master.gain.linearRampToValueAtTime(0.22,audioCtx.currentTime+1.2);
-   btn.textContent='♫ Ambient: On';
-  }else if(audioCtx.state==='running'){
-   await audioCtx.suspend();btn.textContent='♫ Ambient: Off';
-  }else{
-   await audioCtx.resume();btn.textContent='♫ Ambient: On';
+  // Audio must be started directly from this button tap on mobile browsers.
+  if(!audioCtx) audioCtx=new AudioAPI();
+  await audioCtx.resume();
+  if(audioCtx.state!=='running') throw new Error('AudioContext did not start');
+
+  if(ambientOn){
+   if(ambientMaster){
+    const now=audioCtx.currentTime;
+    ambientMaster.gain.cancelScheduledValues(now);
+    ambientMaster.gain.setTargetAtTime(0,now,0.08);
+    const oldNodes=ambientNodes.slice();
+    setTimeout(()=>{
+     oldNodes.forEach(node=>{try{node.stop&&node.stop();}catch(e){} try{node.disconnect();}catch(e){}});
+    },450);
+   }
+   ambientNodes=[];
+   ambientOn=false;
+   btn.textContent='♫ Ambient: Off';
+   return;
   }
- }catch(err){btn.textContent='Tap to retry';console.error('Ambient audio error:',err)}
+
+  // Rebuild a gentle but clearly audible ambient chord.
+  const master=audioCtx.createGain();
+  master.gain.setValueAtTime(0,audioCtx.currentTime);
+  master.gain.setTargetAtTime(0.42,audioCtx.currentTime,0.35);
+  const limiter=audioCtx.createDynamicsCompressor();
+  limiter.threshold.value=-18;
+  limiter.knee.value=18;
+  limiter.ratio.value=4;
+  limiter.attack.value=0.01;
+  limiter.release.value=0.25;
+  master.connect(limiter);
+  limiter.connect(audioCtx.destination);
+
+  const nodes=[];
+  [220,261.63,329.63,440].forEach((hz,index)=>{
+   const oscillator=audioCtx.createOscillator();
+   const voice=audioCtx.createGain();
+   oscillator.type=index===3?'triangle':'sine';
+   oscillator.frequency.setValueAtTime(hz,audioCtx.currentTime);
+   voice.gain.setValueAtTime([0.20,0.16,0.13,0.07][index],audioCtx.currentTime);
+   oscillator.connect(voice);
+   voice.connect(master);
+   oscillator.start();
+   nodes.push(oscillator,voice);
+  });
+
+  ambientMaster=master;
+  ambientNodes=nodes.concat([master,limiter]);
+  ambientOn=true;
+  btn.textContent='♫ Ambient: On';
+ }catch(err){
+  ambientOn=false;
+  btn.textContent='♫ Tap to retry';
+  console.error('StoryVerse ambient audio error:',err);
+ }
 }
 $('ambient').addEventListener('click',toggleAmbient);
 renderFilters();renderStories();
