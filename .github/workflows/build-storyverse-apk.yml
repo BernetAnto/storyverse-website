@@ -1,0 +1,157 @@
+name: Build StoryVerse Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'index.html'
+      - 'ambient.mp3'
+      - '.github/workflows/build-storyverse-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Android app wrapper
+        run: flutter create --platforms=android --project-name storyverse_app app
+
+      - name: Configure app dependencies
+        working-directory: app
+        run: |
+          cat > pubspec.yaml <<'EOF'
+          name: storyverse_app
+          description: StoryVerse story reader
+          publish_to: none
+          version: 1.0.0+1
+          environment:
+            sdk: ">=3.3.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            webview_flutter: ^4.10.0
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^5.0.0
+          flutter:
+            uses-material-design: true
+          EOF
+          cat > lib/main.dart <<'EOF'
+          import 'package:flutter/material.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const StoryVerseApp());
+          }
+
+          class StoryVerseApp extends StatelessWidget {
+            const StoryVerseApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: 'StoryVerse',
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData.dark(),
+                home: const StoryVerseHome(),
+              );
+            }
+          }
+
+          class StoryVerseHome extends StatefulWidget {
+            const StoryVerseHome({super.key});
+
+            @override
+            State<StoryVerseHome> createState() => _StoryVerseHomeState();
+          }
+
+          class _StoryVerseHomeState extends State<StoryVerseHome> {
+            late final WebViewController controller;
+
+            @override
+            void initState() {
+              super.initState();
+              controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setBackgroundColor(const Color(0xFF100B24))
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onWebResourceError: (error) {
+                      debugPrint('StoryVerse web error: ${error.description}');
+                    },
+                  ),
+                )
+                ..loadRequest(Uri.parse('https://bernetanto.github.io/storyverse-website/'));
+            }
+
+            Future<bool> _handleBack() async {
+              if (await controller.canGoBack()) {
+                await controller.goBack();
+                return false;
+              }
+              return true;
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return PopScope(
+                canPop: false,
+                onPopInvokedWithResult: (didPop, result) async {
+                  if (!didPop) {
+                    final shouldExit = await _handleBack();
+                    if (shouldExit && mounted) {
+                      Navigator.of(context).maybePop();
+                    }
+                  }
+                },
+                child: Scaffold(
+                  backgroundColor: const Color(0xFF100B24),
+                  body: SafeArea(child: WebViewWidget(controller: controller)),
+                ),
+              );
+            }
+          }
+          EOF
+
+      - name: Allow internet access
+        working-directory: app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android.permission.INTERNET' not in s:
+              s = s.replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <application', 1)
+          s = s.replace('android:label="story_verse_app"', 'android:label="StoryVerse"')
+          s = s.replace('android:label="storyverse_app"', 'android:label="StoryVerse"')
+          p.write_text(s)
+          PY
+
+      - name: Build release APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StoryVerse-Android-APK
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
