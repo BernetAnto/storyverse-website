@@ -46,66 +46,25 @@ function back(){$('reader').style.display='none';$('library').style.display='blo
 $('search').addEventListener('input',renderStories);$('back').onclick=back;$('prev').onclick=()=>{if(chapter>0){chapter--;renderChapter()}};$('next').onclick=next;$('auto').onchange=renderChapter;
 $('fontDown').onclick=()=>{fontSize=Math.max(14,fontSize-2);$('prose').style.fontSize=fontSize+'px'};$('fontUp').onclick=()=>{fontSize=Math.min(30,fontSize+2);$('prose').style.fontSize=fontSize+'px'};
 $('theme').onclick=()=>document.body.classList.toggle('light');
+// Use the user's own MP3 file stored at the repository root as ambient.mp3.
+const ambientTrack=new Audio('./ambient.mp3');
+ambientTrack.loop=true;
+ambientTrack.preload='auto';
+ambientTrack.volume=0.75;
 async function toggleAmbient(){
  const btn=$('ambient');
- const AudioAPI=window.AudioContext||window.webkitAudioContext;
- if(!AudioAPI){btn.textContent='Audio unsupported';return}
  try{
-  // Audio must be started directly from this button tap on mobile browsers.
-  if(!audioCtx) audioCtx=new AudioAPI();
-  await audioCtx.resume();
-  if(audioCtx.state!=='running') throw new Error('AudioContext did not start');
-
-  if(ambientOn){
-   if(ambientMaster){
-    const now=audioCtx.currentTime;
-    ambientMaster.gain.cancelScheduledValues(now);
-    ambientMaster.gain.setTargetAtTime(0,now,0.08);
-    const oldNodes=ambientNodes.slice();
-    setTimeout(()=>{
-     oldNodes.forEach(node=>{try{node.stop&&node.stop();}catch(e){} try{node.disconnect();}catch(e){}});
-    },450);
-   }
-   ambientNodes=[];
-   ambientOn=false;
+  if(ambientTrack.paused){
+   await ambientTrack.play();
+   btn.textContent='♫ Ambient: On';
+  }else{
+   ambientTrack.pause();
    btn.textContent='♫ Ambient: Off';
-   return;
   }
-
-  // Rebuild a gentle but clearly audible ambient chord.
-  const master=audioCtx.createGain();
-  master.gain.setValueAtTime(0,audioCtx.currentTime);
-  master.gain.setTargetAtTime(0.42,audioCtx.currentTime,0.35);
-  const limiter=audioCtx.createDynamicsCompressor();
-  limiter.threshold.value=-18;
-  limiter.knee.value=18;
-  limiter.ratio.value=4;
-  limiter.attack.value=0.01;
-  limiter.release.value=0.25;
-  master.connect(limiter);
-  limiter.connect(audioCtx.destination);
-
-  const nodes=[];
-  [220,261.63,329.63,440].forEach((hz,index)=>{
-   const oscillator=audioCtx.createOscillator();
-   const voice=audioCtx.createGain();
-   oscillator.type=index===3?'triangle':'sine';
-   oscillator.frequency.setValueAtTime(hz,audioCtx.currentTime);
-   voice.gain.setValueAtTime([0.20,0.16,0.13,0.07][index],audioCtx.currentTime);
-   oscillator.connect(voice);
-   voice.connect(master);
-   oscillator.start();
-   nodes.push(oscillator,voice);
-  });
-
-  ambientMaster=master;
-  ambientNodes=nodes.concat([master,limiter]);
-  ambientOn=true;
-  btn.textContent='♫ Ambient: On';
  }catch(err){
-  ambientOn=false;
-  btn.textContent='♫ Tap to retry';
-  console.error('StoryVerse ambient audio error:',err);
+  btn.textContent='♫ Audio error';
+  console.error('StoryVerse MP3 playback error:',err);
+  alert('Ambient MP3 could not be loaded. Please make sure ambient.mp3 is uploaded to the repository root.');
  }
 }
 $('ambient').addEventListener('click',toggleAmbient);
