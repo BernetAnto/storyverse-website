@@ -53,6 +53,7 @@ jobs:
           EOF
           cat > lib/main.dart <<'EOF'
           import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
 
           void main() {
@@ -100,23 +101,16 @@ jobs:
                 ..loadRequest(Uri.parse('https://bernetanto.github.io/storyverse-website/'));
             }
 
-            Future<bool> _handleBack() async {
-              if (await controller.canGoBack()) {
-                await controller.goBack();
-                return false;
-              }
-              return true;
-            }
-
             @override
             Widget build(BuildContext context) {
               return PopScope(
                 canPop: false,
                 onPopInvokedWithResult: (didPop, result) async {
                   if (!didPop) {
-                    final shouldExit = await _handleBack();
-                    if (shouldExit && mounted) {
-                      Navigator.of(context).maybePop();
+                    if (await controller.canGoBack()) {
+                      await controller.goBack();
+                    } else {
+                      SystemNavigator.pop();
                     }
                   }
                 },
