@@ -135,6 +135,12 @@ jobs:
           s = s.replace('android:label="story_verse_app"', 'android:label="StoryVerse"')
           s = s.replace('android:label="storyverse_app"', 'android:label="StoryVerse"')
           p.write_text(s)
+
+          # Work around an Android Lint crash in the webview plugin during release builds.
+          gradle_file = Path('android/build.gradle')
+          gradle_text = gradle_file.read_text()
+          gradle_text += '''\n\n// Disable the crashing release lint task; APK compilation remains enabled.\nsubprojects { subproject ->\n    subproject.tasks.configureEach { task ->\n        if (task.name == "lintVitalAnalyzeRelease") {\n            task.enabled = false\n        }\n    }\n}\n'''
+          gradle_file.write_text(gradle_text)
           PY
 
       - name: Build release APK
