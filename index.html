@@ -46,6 +46,31 @@ function back(){$('reader').style.display='none';$('library').style.display='blo
 $('search').addEventListener('input',renderStories);$('back').onclick=back;$('prev').onclick=()=>{if(chapter>0){chapter--;renderChapter()}};$('next').onclick=next;$('auto').onchange=renderChapter;
 $('fontDown').onclick=()=>{fontSize=Math.max(14,fontSize-2);$('prose').style.fontSize=fontSize+'px'};$('fontUp').onclick=()=>{fontSize=Math.min(30,fontSize+2);$('prose').style.fontSize=fontSize+'px'};
 $('theme').onclick=()=>document.body.classList.toggle('light');
-$('ambient').onclick=()=>{if(!audioCtx){audioCtx=new(window.AudioContext||window.webkitAudioContext)();osc=audioCtx.createOscillator();gain=audioCtx.createGain();osc.type='sine';osc.frequency.value=110;gain.gain.value=0.025;osc.connect(gain);gain.connect(audioCtx.destination);osc.start();$('ambient').textContent='♫ Ambient: On'}else if(audioCtx.state==='running'){audioCtx.suspend();$('ambient').textContent='♫ Ambient: Off'}else{audioCtx.resume();$('ambient').textContent='♫ Ambient: On'}};
+async function toggleAmbient(){
+ const btn=$('ambient');
+ try{
+  const AudioAPI=window.AudioContext||window.webkitAudioContext;
+  if(!AudioAPI){btn.textContent='Audio unavailable';return}
+  if(!audioCtx){
+   audioCtx=new AudioAPI();
+   await audioCtx.resume();
+   gain=audioCtx.createGain();gain.gain.setValueAtTime(0,audioCtx.currentTime);
+   const master= gain;master.connect(audioCtx.destination);
+   [174.61,220,261.63,329.63].forEach((hz,i)=>{
+    const o=audioCtx.createOscillator();const voice=audioCtx.createGain();
+    o.type=i===3?'triangle':'sine';o.frequency.value=hz;
+    voice.gain.value=i===3?0.10:0.18;
+    o.connect(voice);voice.connect(master);o.start();
+   });
+   master.gain.linearRampToValueAtTime(0.22,audioCtx.currentTime+1.2);
+   btn.textContent='♫ Ambient: On';
+  }else if(audioCtx.state==='running'){
+   await audioCtx.suspend();btn.textContent='♫ Ambient: Off';
+  }else{
+   await audioCtx.resume();btn.textContent='♫ Ambient: On';
+  }
+ }catch(err){btn.textContent='Tap to retry';console.error('Ambient audio error:',err)}
+}
+$('ambient').addEventListener('click',toggleAmbient);
 renderFilters();renderStories();
 </script></body></html>
